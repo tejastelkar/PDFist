@@ -157,10 +157,12 @@ class PdfMetadata {
 class WordCountResult {
   final int words;
   final int characters;
+  final int charsNoSpaces;
   final int pages;
   const WordCountResult({
     required this.words,
     required this.characters,
+    required this.charsNoSpaces,
     required this.pages,
   });
 }

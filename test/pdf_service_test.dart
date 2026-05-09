@@ -12,8 +12,8 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:image/image.dart' as img;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
-import 'package:pdfo/services/pdf_service.dart';
-import 'package:pdfo/models/pdf_models.dart';
+import 'package:pdfist/services/pdf_service.dart';
+import 'package:pdfist/models/pdf_models.dart';
 
 // ─── Path-provider mock ───────────────────────────────────────────────────────
 

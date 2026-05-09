@@ -11,7 +11,7 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
-import 'package:pdfo/services/conversion_service.dart';
+import 'package:pdfist/services/conversion_service.dart';
 
 class _FakePP extends Fake
     with MockPlatformInterfaceMixin

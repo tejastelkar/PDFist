@@ -1,4 +1,4 @@
-package com.pdfo.pdfo
+package com.pdfist.app
 
 import io.flutter.embedding.android.FlutterActivity
 

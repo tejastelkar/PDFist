@@ -945,6 +945,16 @@ Map<String, dynamic> _buildDocx(Map<String, dynamic> p_) {
   }
 }
 
+String _xlsxColLetter(int col) {
+  var result = '';
+  var n = col;
+  do {
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = n ~/ 26 - 1;
+  } while (n >= 0);
+  return result;
+}
+
 Map<String, dynamic> _buildXlsx(Map<String, dynamic> p_) {
   final inputPath = p_['inputPath'] as String;
   final outputPath = p_['outputPath'] as String;
@@ -956,16 +966,69 @@ Map<String, dynamic> _buildXlsx(Map<String, dynamic> p_) {
     final sharedStrings = <String>[];
     final sheetXmls = <String>[];
     for (int pg = 0; pg < pageCount; pg++) {
-      final text = extractor.extractText(startPageIndex: pg, endPageIndex: pg);
-      final lines = text.split('\n').map((l) => l.trim()).toList();
+      final rawLines = extractor.extractTextLines(startPageIndex: pg, endPageIndex: pg);
+
+      // Collect all words across all lines, sorted top→bottom then left→right.
+      final allWords = <TextWord>[];
+      for (final line in rawLines) {
+        allWords.addAll(line.wordCollection);
+      }
+      allWords.sort((a, b) {
+        final dy = a.bounds.top.compareTo(b.bounds.top);
+        return dy != 0 ? dy : a.bounds.left.compareTo(b.bounds.left);
+      });
+
+      // Group words into visual rows (words within 4pt vertically).
+      final wordRows = <List<TextWord>>[];
+      for (final word in allWords) {
+        if (word.text.trim().isEmpty) continue;
+        if (wordRows.isEmpty ||
+            word.bounds.top - wordRows.last.first.bounds.top > 4) {
+          wordRows.add([word]);
+        } else {
+          wordRows.last.add(word);
+        }
+      }
+
+      // Within each row, group consecutive words into cells by X-gap.
+      // Gap > 20pt between the right edge of one word and left edge of next
+      // signals a new column.
+      final cellRows = <List<String>>[];
+      for (final row in wordRows) {
+        row.sort((a, b) => a.bounds.left.compareTo(b.bounds.left));
+        final cells = <String>[];
+        var currentCell = '';
+        var prevRight = double.negativeInfinity;
+        for (final word in row) {
+          final gap = word.bounds.left - prevRight;
+          if (prevRight == double.negativeInfinity) {
+            currentCell = word.text;
+          } else if (gap > 20) {
+            cells.add(currentCell.trim());
+            currentCell = word.text;
+          } else {
+            currentCell += ' ${word.text}';
+          }
+          prevRight = word.bounds.right;
+        }
+        if (currentCell.trim().isNotEmpty) cells.add(currentCell.trim());
+        if (cells.isNotEmpty) cellRows.add(cells);
+      }
+
       final rowsXml = StringBuffer();
-      int rowNum = 1;
-      for (final line in lines) {
-        if (line.isEmpty) { rowNum++; continue; }
-        final siIdx = sharedStrings.length;
-        sharedStrings.add(line);
-        rowsXml.write('<row r="$rowNum"><c r="A$rowNum" t="s"><v>$siIdx</v></c></row>');
-        rowNum++;
+      for (int ri = 0; ri < cellRows.length; ri++) {
+        final rowNum = ri + 1;
+        final rowXml = StringBuffer('<row r="$rowNum">');
+        for (int ci = 0; ci < cellRows[ri].length; ci++) {
+          final cell = cellRows[ri][ci];
+          if (cell.isEmpty) continue;
+          final colLetter = _xlsxColLetter(ci);
+          final siIdx = sharedStrings.length;
+          sharedStrings.add(cell);
+          rowXml.write('<c r="$colLetter$rowNum" t="s"><v>$siIdx</v></c>');
+        }
+        rowXml.write('</row>');
+        rowsXml.write(rowXml);
       }
       sheetXmls.add('<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>$rowsXml</sheetData></worksheet>');
     }

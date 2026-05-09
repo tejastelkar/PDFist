@@ -57,7 +57,6 @@ final kCategories = <ToolCategory>[
     PdfTool(id: 'page-numbers', label: 'Page Numbers', desc: 'Add numbering', num: '', category: '', categoryId: ''),
     PdfTool(id: 'header-footer', label: 'Header & Footer', desc: 'Repeating margins', num: '', category: '', categoryId: ''),
     PdfTool(id: 'watermark', label: 'Watermark', desc: 'Stamp text or image', num: '', category: '', categoryId: ''),
-    PdfTool(id: 'remove-watermark', label: 'Remove Watermark', desc: 'Strip watermark', num: '', category: '', categoryId: ''),
     PdfTool(id: 'stamp', label: 'Stamp', desc: 'DRAFT, APPROVED, etc.', num: '', category: '', categoryId: ''),
   ]),
   ToolCategory(id: 'pdf-to', label: 'Convert — PDF To', tools: [
@@ -101,7 +100,6 @@ final kCategories = <ToolCategory>[
   ]),
   ToolCategory(id: 'qr', label: 'QR & Barcodes', tools: [
     PdfTool(id: 'add-qr', label: 'Add QR Code', desc: 'Embed a QR', num: '', category: '', categoryId: ''),
-    PdfTool(id: 'read-qr', label: 'Read QR from PDF', desc: 'Scan codes', num: '', category: '', categoryId: ''),
   ]),
   ToolCategory(id: 'utilities', label: 'Utilities', tools: [
     PdfTool(id: 'duplicate', label: 'Duplicate', desc: 'Copy the file', num: '', category: '', categoryId: ''),

@@ -11,7 +11,7 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
-import 'package:pdfo/services/conversion_service.dart';
+import 'package:pdfist/services/conversion_service.dart';
 
 // ─── Path-provider mock ───────────────────────────────────────────────────────
 
@@ -220,6 +220,56 @@ void main() {
     expect(md, contains('Page 2'));
     expect(md, contains('---'));        // page separator
     print('[pdfToMarkdown] ✓ valid Markdown with headings and separators');
+  });
+
+  // ── PDF → Excel column detection ────────────────────────────────────────────
+
+  test('pdfToExcel — multi-column data lands in correct columns (not just A)', () async {
+    // Build a PDF whose page 1 has text positioned in 3 clear columns.
+    final doc = PdfDocument();
+    final font = PdfStandardFont(PdfFontFamily.helvetica, 11);
+    final brush = PdfSolidBrush(PdfColor(0, 0, 0));
+    final page = doc.pages.add();
+    // Row 1 header (y=40)
+    page.graphics.drawString('Item',     font, brush: brush, bounds: const Rect.fromLTWH(40,  40, 100, 14));
+    page.graphics.drawString('Qty',      font, brush: brush, bounds: const Rect.fromLTWH(200, 40, 100, 14));
+    page.graphics.drawString('Price',    font, brush: brush, bounds: const Rect.fromLTWH(350, 40, 100, 14));
+    // Row 2 data (y=60)
+    page.graphics.drawString('Widget A', font, brush: brush, bounds: const Rect.fromLTWH(40,  60, 100, 14));
+    page.graphics.drawString('10',       font, brush: brush, bounds: const Rect.fromLTWH(200, 60, 100, 14));
+    page.graphics.drawString('9.99',     font, brush: brush, bounds: const Rect.fromLTWH(350, 60, 100, 14));
+    // Row 3 data (y=80)
+    page.graphics.drawString('Widget B', font, brush: brush, bounds: const Rect.fromLTWH(40,  80, 100, 14));
+    page.graphics.drawString('5',        font, brush: brush, bounds: const Rect.fromLTWH(200, 80, 100, 14));
+    page.graphics.drawString('19.99',    font, brush: brush, bounds: const Rect.fromLTWH(350, 80, 100, 14));
+    final pdfPath = '${tempDir.path}/multicol.pdf';
+    File(pdfPath).writeAsBytesSync(doc.saveSync());
+    doc.dispose();
+
+    final result = await ConversionService.pdfToExcel(pdfPath);
+    expect(result.success, isTrue, reason: result.error);
+
+    // Parse the xlsx and check columns.
+    final archive = ZipDecoder().decodeBytes(File(result.outputPath!).readAsBytesSync());
+    final sheet1 = archive.findFile('xl/worksheets/sheet1.xml');
+    expect(sheet1, isNotNull);
+    final sheetXml = String.fromCharCodes(sheet1!.content as List<int>);
+
+    print('[pdfToExcel-cols] sheet1.xml snippet: ${sheetXml.substring(0, sheetXml.length.clamp(0, 400))}');
+
+    // Headers should be in A1, B1, C1 — NOT all in A.
+    expect(sheetXml, contains('A1'), reason: 'Item header missing in A1');
+    expect(sheetXml, contains('B1'), reason: 'Qty header missing in B1 — still dumping into column A only');
+    expect(sheetXml, contains('C1'), reason: 'Price header missing in C1');
+
+    final ssFile = archive.findFile('xl/sharedStrings.xml');
+    final ssXml = String.fromCharCodes(ssFile!.content as List<int>);
+    expect(ssXml, contains('Item'));
+    expect(ssXml, contains('Qty'));
+    expect(ssXml, contains('Price'));
+    expect(ssXml, contains('Widget A'));
+    expect(ssXml, contains('9.99'));
+    print('[pdfToExcel-cols] ✓ multi-column data in correct A/B/C columns');
   });
 
   // ── Edge case: single-page PDF ───────────────────────────────────────────────

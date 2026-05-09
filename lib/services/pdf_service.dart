@@ -85,9 +85,10 @@ Map<String, dynamic> _doMerge(Map<String, dynamic> p_) {
       doc.dispose();
     }
     final outBytes = Uint8List.fromList(outDoc.saveSync());
+    final pageCount = outDoc.pages.count;
     outDoc.dispose();
     File(outputPath).writeAsBytesSync(outBytes);
-    return _ok(outputPath, outBytes, 0, totalInput, sw);
+    return _ok(outputPath, outBytes, pageCount, totalInput, sw);
   } catch (e) {
     return _err(e);
   }
@@ -105,6 +106,7 @@ Map<String, dynamic> _doSplit(Map<String, dynamic> p_) {
     final total = doc.pages.count;
     final outputPaths = <String>[];
     int totalOutput = 0;
+    int firstOutputPageCount = 0;
 
     List<List<int>> ranges = [];
     if (mode == 'individual') {
@@ -137,6 +139,7 @@ Map<String, dynamic> _doSplit(Map<String, dynamic> p_) {
         }
       }
       final outBytes = Uint8List.fromList(outDoc.saveSync());
+      if (ri == 0) firstOutputPageCount = outDoc.pages.count;
       outDoc.dispose();
       final ts = DateTime.now().millisecondsSinceEpoch;
       final outPath = p.join(outputDir, '${base}_part${ri + 1}_$ts.pdf');
@@ -150,7 +153,7 @@ Map<String, dynamic> _doSplit(Map<String, dynamic> p_) {
       'outputPath': outputPaths.first,
       'outputPaths': outputPaths,
       'outputSize': totalOutput,
-      'pageCount': total,
+      'pageCount': firstOutputPageCount,
       'inputSize': bytes.length,
       'ms': sw.elapsedMilliseconds,
     };
@@ -275,6 +278,9 @@ Map<String, dynamic> _doPassword(Map<String, dynamic> p_) {
       doc.security.userPassword = userPw;
       doc.security.ownerPassword = ownerPw.isEmpty ? userPw : ownerPw;
       doc.security.algorithm = PdfEncryptionAlgorithm.aesx256BitRevision6;
+    } else {
+      doc.security.userPassword = '';
+      doc.security.ownerPassword = '';
     }
     final outBytes = Uint8List.fromList(doc.saveSync());
     final pageCount = doc.pages.count;
@@ -1186,10 +1192,11 @@ Map<String, dynamic> _doCropPdf(Map<String, dynamic> p_) {
       }
     }
     final outBytes = Uint8List.fromList(outDoc.saveSync());
+    final pageCount = outDoc.pages.count;
     doc.dispose();
     outDoc.dispose();
     File(outputPath).writeAsBytesSync(outBytes);
-    return _ok(outputPath, outBytes, doc.pages.count, bytes.length, sw);
+    return _ok(outputPath, outBytes, pageCount, bytes.length, sw);
   } catch (e) {
     return _err(e);
   }
@@ -1205,7 +1212,7 @@ Map<String, dynamic> _doRedact(Map<String, dynamic> p_) {
     final doc = PdfDocument(inputBytes: bytes);
     for (final area in areas) {
       final pageIndex = area['page'] as int? ?? 0;
-      if (pageIndex >= doc.pages.count) continue;
+      if (pageIndex < 0 || pageIndex >= doc.pages.count) continue;
       final x = (area['x'] as num).toDouble();
       final y = (area['y'] as num).toDouble();
       final w = (area['w'] as num).toDouble();
@@ -1375,7 +1382,6 @@ Map<String, dynamic> _doFindReplace(Map<String, dynamic> p_) {
     final bytes = File(inputPath).readAsBytesSync();
     final doc = PdfDocument(inputBytes: bytes);
     final extractor = PdfTextExtractor(doc);
-    final font = PdfStandardFont(PdfFontFamily.helvetica, 10);
     final whiteBrush = PdfSolidBrush(PdfColor(255, 255, 255));
     final blackBrush = PdfSolidBrush(PdfColor(0, 0, 0));
     int count = 0;
@@ -1386,6 +1392,8 @@ Map<String, dynamic> _doFindReplace(Map<String, dynamic> p_) {
         final findText = caseSensitive ? find : find.toLowerCase();
         if (lineText.contains(findText)) {
           final b = line.bounds;
+          final approxFontSize = b.height.clamp(6.0, 72.0);
+          final font = PdfStandardFont(PdfFontFamily.helvetica, approxFontSize);
           doc.pages[i].graphics.drawRectangle(brush: whiteBrush, bounds: b);
           final newText = line.text.replaceAll(
               caseSensitive ? find : RegExp(find, caseSensitive: false), replace);
@@ -1865,39 +1873,6 @@ Map<String, dynamic> _doRemoveDuplicates(Map<String, dynamic> p_) {
   }
 }
 
-Map<String, dynamic> _doRemoveWatermark(Map<String, dynamic> p_) {
-  final sw = Stopwatch()..start();
-  final inputPath = p_['inputPath'] as String;
-  final outputPath = p_['outputPath'] as String;
-  try {
-    final bytes = File(inputPath).readAsBytesSync();
-    final doc = PdfDocument(inputBytes: bytes);
-    // Rebuild via page templates: createTemplate() captures only the content
-    // stream, not the /Annots array, so annotation-based watermarks are dropped.
-    final total = doc.pages.count;
-    final outDoc = PdfDocument();
-    bool first = true;
-    for (int i = 0; i < total; i++) {
-      if (first) {
-        first = false;
-        final sz = doc.pages[i].getClientSize();
-        outDoc.pageSettings.size = sz;
-        outDoc.pageSettings.margins.all = 0;
-        outDoc.pages.add().graphics.drawPdfTemplate(
-            doc.pages[i].createTemplate(), const Offset(0, 0));
-      } else {
-        _copyPage(outDoc, doc.pages[i]);
-      }
-    }
-    final outBytes = Uint8List.fromList(outDoc.saveSync());
-    doc.dispose();
-    outDoc.dispose();
-    File(outputPath).writeAsBytesSync(outBytes);
-    return _ok(outputPath, outBytes, total, bytes.length, sw);
-  } catch (e) {
-    return _err(e);
-  }
-}
 
 Map<String, dynamic> _doJpegCompress(Map<String, dynamic> p_) {
   final pixels = p_['pixels'] as Uint8List;
@@ -2228,7 +2203,8 @@ class PdfService {
     final doc = PdfDocument(inputBytes: bytes);
     final pages = doc.pages.count;
     doc.dispose();
-    return WordCountResult(words: words, characters: text.length, pages: pages);
+    final charsNoSpaces = text.replaceAll(RegExp(r'\s'), '').length;
+    return WordCountResult(words: words, characters: text.length, charsNoSpaces: charsNoSpaces, pages: pages);
   }
 
   static Future<PdfResult> duplicatePdf(String path) async {
@@ -2484,14 +2460,22 @@ class PdfService {
         {'pathA': pathA, 'pathB': pathB});
     final identical = r['identical'] as bool? ?? false;
     final diffLines = r['diffLines'] as int? ?? 0;
+    final linesA = r['linesA'] as int? ?? 0;
+    final linesB = r['linesB'] as int? ?? 0;
     return PdfResult(
       success: r['success'] as bool? ?? false,
       outputPath: null,
       outputSize: 0,
-      pageCount: diffLines,
+      pageCount: null,
       inputSize: r['inputSize'] as int? ?? 0,
       processingTimeMs: r['ms'] as int? ?? 0,
       error: identical ? null : '$diffLines line(s) differ',
+      extras: {
+        'Result': identical ? 'Identical' : 'Different',
+        'Lines in A': '$linesA',
+        'Lines in B': '$linesB',
+        'Differing lines': '$diffLines',
+      },
     );
   }
 
@@ -2593,11 +2577,6 @@ class PdfService {
         _doRemoveDuplicates, {'inputPath': path, 'outputPath': out}));
   }
 
-  static Future<PdfResult> removeWatermarks(String path) async {
-    final out = await _out(path, 'nowatermark');
-    return _toResult(await compute(
-        _doRemoveWatermark, {'inputPath': path, 'outputPath': out}));
-  }
 
   /// Renders each page to JPEG at [targetDpi] then rebuilds as an image-only
   /// PDF. Genuinely reduces image DPI — text layers are not preserved.

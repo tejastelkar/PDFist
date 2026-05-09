@@ -108,6 +108,19 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
   // Downsample DPI
   int _downsampleDpi = 96;
 
+  // Fill Form
+  Map<String, TextEditingController> _formFieldControllers = {};
+  bool _loadingFormFields = false;
+
+  // Watermark — stored so it isn't recreated on every rebuild
+  late final TextEditingController _watermarkCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _watermarkCtrl = TextEditingController(text: _watermarkText);
+  }
+
   PdfTool get tool => findTool(widget.toolId) ?? kTools.first;
   bool get _hasFile => _filePaths.isNotEmpty;
   bool get _needsTwoFiles =>
@@ -151,7 +164,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
     _ => 'Drop a PDF here',
   };
 
-  Future<void> _pickFile({bool multi = false}) async {
+  Future<void> _pickFile({bool multi = false, bool append = false}) async {
     setState(() => _picking = true);
     try {
       final result = await FilePicker.pickFiles(
@@ -163,7 +176,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
         final paths = result.paths.whereType<String>().toList();
         int pc = 0;
         final isPdf = _allowedExtensions.contains('pdf');
-        if (isPdf && paths.isNotEmpty) {
+        if (isPdf && paths.isNotEmpty && !append) {
           try {
             final bytes = File(paths.first).readAsBytesSync();
             final doc = PdfDocument(inputBytes: bytes);
@@ -172,7 +185,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
           } catch (_) {}
         }
         setState(() {
-          _filePaths.clear();
+          if (!append) _filePaths.clear();
           _filePaths.addAll(paths);
           _sizeInfo = _formatSize(result.files.fold<int>(0, (sum, f) => sum + f.size));
           if (pc > 0) {
@@ -181,9 +194,33 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
             _pageOrder = List.generate(pc, (i) => i);
           }
         });
+        if (widget.toolId == 'fill-form' && paths.isNotEmpty && !append) {
+          _loadFormFields(paths.first);
+        }
       }
     } finally {
       setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _loadFormFields(String path) async {
+    setState(() => _loadingFormFields = true);
+    try {
+      final bytes = await File(path).readAsBytes();
+      final doc = PdfDocument(inputBytes: bytes);
+      final names = <String>[];
+      for (int i = 0; i < doc.form.fields.count; i++) {
+        final name = doc.form.fields[i].name;
+        if (name != null && name.isNotEmpty) { names.add(name); }
+      }
+      doc.dispose();
+      for (final c in _formFieldControllers.values) { c.dispose(); }
+      setState(() {
+        _formFieldControllers = {for (final n in names) n: TextEditingController()};
+      });
+    } catch (_) {
+    } finally {
+      setState(() => _loadingFormFields = false);
     }
   }
 
@@ -306,11 +343,16 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
         },
       'hyperlinks' => {'text': _linkText, 'url': _linkUrl},
       'downsample' => {'dpi': _downsampleDpi},
+      'fill-form' => {
+          'fields': {
+            for (final e in _formFieldControllers.entries)
+              if (e.value.text.isNotEmpty) e.key: e.value.text,
+          }
+        },
       _ => {},
     };
   }
 
-  @override
   @override
   void dispose() {
     _bookmarkTitleCtrl.dispose();
@@ -320,6 +362,8 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
     _redactYCtrl.dispose();
     _redactWCtrl.dispose();
     _redactHCtrl.dispose();
+    for (final c in _formFieldControllers.values) { c.dispose(); }
+    _watermarkCtrl.dispose();
     super.dispose();
   }
 
@@ -392,7 +436,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
                         // Second file slot for interleave/compare
                         if (_needsTwoFiles && _filePaths.length < 2) ...[
                           const SizedBox(height: 12),
-                          _buildDropzone(label: 'ADD SECOND PDF'),
+                          _buildDropzone(label: 'ADD SECOND PDF', append: true),
                         ],
                         // Options
                         if (_hasFile) ...[
@@ -446,9 +490,9 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
     );
   }
 
-  Widget _buildDropzone({String label = 'OR TAP TO BROWSE'}) {
+  Widget _buildDropzone({String label = 'OR TAP TO BROWSE', bool append = false}) {
     return GestureDetector(
-      onTap: _picking ? null : () => _pickFile(),
+      onTap: _picking ? null : () => _pickFile(append: append),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
         decoration: BoxDecoration(
@@ -521,6 +565,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
 
   bool get _canRun {
     if (!_hasFile) return false;
+    if (_needsTwoFiles && _filePaths.length < 2) return false;
     if (widget.toolId == 'extract-pages' && _selectedPages.isEmpty) return false;
     if (widget.toolId == 'delete-pages' && _selectedPages.isEmpty) return false;
     if (widget.toolId == 'delete-pages' && _pageCount > 0 && _selectedPages.length >= _pageCount) return false;
@@ -570,6 +615,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
     if (id == 'sticky-notes') return _stickyNotesOpts();
     if (id == 'hyperlinks') return _hyperlinksOpts();
     if (id == 'downsample') return _downsampleOpts();
+    if (id == 'fill-form') return _fillFormOpts();
     return Text(
       'Ready to ${tool.label.toLowerCase()}. Tap the button below.',
       style: AppTextStyles.body(13, color: AppColors.muted),
@@ -809,7 +855,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
               style: AppTextStyles.body(13, color: AppColors.muted)),
           const SizedBox(height: 12),
           TextField(
-            controller: TextEditingController(text: _watermarkText),
+            controller: _watermarkCtrl,
             onChanged: (v) => _watermarkText = v,
             style: AppTextStyles.body(15),
             cursorColor: AppColors.text,
@@ -1476,7 +1522,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () {
-              final page = int.tryParse(_redactPageCtrl.text) ?? 1;
+              final page = (int.tryParse(_redactPageCtrl.text) ?? 1).clamp(1, _pageCount > 0 ? _pageCount : 9999);
               final x = double.tryParse(_redactXCtrl.text) ?? 0;
               final y = double.tryParse(_redactYCtrl.text) ?? 0;
               final w = double.tryParse(_redactWCtrl.text) ?? 0;
@@ -2095,6 +2141,47 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
         Text(
             'Re-renders pages as JPEG images at the selected DPI. Text layers are not preserved.',
             style: AppTextStyles.mono(10, color: AppColors.muted)),
+      ],
+    );
+  }
+
+  Widget _fillFormOpts() {
+    if (_loadingFormFields) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.text, strokeWidth: 2));
+    }
+    if (_formFieldControllers.isEmpty) {
+      return Text(
+        'No fillable fields detected in this PDF.',
+        style: AppTextStyles.body(13, color: AppColors.muted),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Form fields', style: AppTextStyles.body(13, color: AppColors.muted)),
+        const SizedBox(height: 12),
+        for (final entry in _formFieldControllers.entries) ...[
+          Text(entry.key, style: AppTextStyles.mono(11, color: AppColors.muted)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: entry.value,
+            style: AppTextStyles.body(14),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppColors.bg,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppColors.line),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppColors.text),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
       ],
     );
   }

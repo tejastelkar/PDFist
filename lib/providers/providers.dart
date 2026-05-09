@@ -157,7 +157,7 @@ class PdfProcessingNotifier extends Notifier<ProcessingState> {
       'remove-duplicates': 'Remove Duplicates', 'repair': 'Repair',
       'add-perms': 'Add Permissions', 'remove-perms': 'Remove Permissions',
       'redact': 'Redact', 'crop': 'Crop', 'date-stamp': 'Date Stamp',
-      'add-qr': 'Add QR Code', 'read-qr': 'Read QR',
+      'add-qr': 'Add QR Code',
       'md-to-pdf': 'MD→PDF', 'find-replace': 'Find & Replace',
       'bookmarks': 'Bookmarks', 'fill-form': 'Fill Form',
       'extract-images': 'Extract Images', 'extract-text': 'Extract Text',
@@ -166,7 +166,7 @@ class PdfProcessingNotifier extends Notifier<ProcessingState> {
       'thumbnails': 'Thumbnails', 'compare': 'Compare',
       'ocr-extract': 'OCR Extract', 'ocr-selectable': 'Make Selectable',
       'draw-sig': 'Draw Signature', 'typed-sig': 'Typed Signature',
-      'place-sig': 'Place Signature', 'remove-watermark': 'Remove Watermark',
+      'place-sig': 'Place Signature',
       'word-to-pdf': 'Word→PDF', 'excel-to-pdf': 'Excel→PDF',
       'html-to-pdf': 'HTML→PDF', 'draw': 'Draw', 'add-shapes': 'Add Shapes',
       'highlight': 'Highlight', 'underline': 'Underline',
@@ -439,7 +439,7 @@ class PdfProcessingNotifier extends Notifier<ProcessingState> {
               'Pages': '${r.pages}',
               'Words': '${r.words}',
               'Characters': '${r.characters}',
-              'Chars (no spaces)': '${r.characters - (r.characters - r.words)}',
+              'Chars (no spaces)': '${r.charsNoSpaces}',
             });
       }
 
@@ -544,33 +544,6 @@ class PdfProcessingNotifier extends Notifier<ProcessingState> {
             ));
       }
 
-      case 'read-qr': {
-        state = state.copyWith(progress: 0.4, message: 'Scanning pages…');
-        final text = await PdfService.extractTextFromScan(path);
-        final dir = await getApplicationDocumentsDirectory();
-        final outDir = Directory(p.join(dir.path, 'PDFist', 'Output'));
-        await outDir.create(recursive: true);
-        final base = p.basenameWithoutExtension(path);
-        final outPath = p.join(outDir.path,
-            '${base}_scan_${DateTime.now().millisecondsSinceEpoch}.txt');
-        await File(outPath).writeAsString(
-            text.isEmpty ? '(no text found)' : text);
-        final outSize = await File(outPath).length();
-        final preview = text.isEmpty
-            ? '(no text found)'
-            : text.substring(0, text.length > 300 ? 300 : text.length);
-        return PdfResult(
-            success: true,
-            outputPath: outPath,
-            outputSize: outSize.toInt(),
-            pageCount: null,
-            inputSize: (await File(path).length()).toInt(),
-            extras: {'Scanned content': preview},
-            error: text.isEmpty ? 'No content found in scan' : null);
-      }
-
-      case 'remove-watermark':
-        return PdfService.removeWatermarks(path);
 
       case 'word-to-pdf':
         return PdfService.wordToPdf(path);

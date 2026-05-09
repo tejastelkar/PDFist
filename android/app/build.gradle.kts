@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.pdfo.pdfo"
+    namespace = "com.pdfist.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -20,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pdfo.pdfo"
+        applicationId = "com.pdfist.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

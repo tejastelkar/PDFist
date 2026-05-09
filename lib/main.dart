@@ -1,8 +1,10 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'config/app_config.dart';
+import 'firebase_options.dart';
 import 'models/history_entry.dart';
 import 'router/app_router.dart';
 import 'services/auth_service.dart';
@@ -18,8 +20,7 @@ Future<void> main() async {
 
   // Firebase — only when kFirebaseEnabled is true.
   if (kFirebaseEnabled) {
-    // Uncomment and add your firebase_options.dart after Firebase setup:
-    // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     await AuthService.instance.initGoogleSignIn();
   }
 

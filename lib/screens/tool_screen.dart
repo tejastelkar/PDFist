@@ -11,6 +11,7 @@ import '../models/pdf_models.dart';
 import '../models/tool_catalog.dart';
 import '../models/tool_model.dart';
 import '../providers/providers.dart';
+import '../services/pdf_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared.dart';
 
@@ -115,10 +116,43 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
   // Watermark — stored so it isn't recreated on every rebuild
   late final TextEditingController _watermarkCtrl;
 
+  // Protect — separate owner password
+  String _protectOwnerPassword = '';
+  late final TextEditingController _ownerPasswordCtrl;
+
+  // Watermark controls
+  double _watermarkOpacity = 0.3;
+  double _watermarkFontSize = 60;
+  double _watermarkRotation = -45;
+
+  // Add Text placement
+  double _addTextX = 50;
+  double _addTextY = 50;
+  double _addTextFontSize = 14;
+  int _addTextPage = 0;
+
+  // Add Image placement
+  double _addImageX = 0;
+  double _addImageY = 0;
+  double _addImageW = 150;
+  double _addImageH = 150;
+  int _addImagePage = 0;
+
+  // Signature placement (draw-sig / typed-sig / place-sig)
+  double _sigX = 50;
+  double _sigY = 700;
+  double _sigW = 200;
+  double _sigH = 60;
+  int _sigPage = 0;
+
+  // Page 1 thumbnail preview
+  Uint8List? _thumbnailBytes;
+
   @override
   void initState() {
     super.initState();
     _watermarkCtrl = TextEditingController(text: _watermarkText);
+    _ownerPasswordCtrl = TextEditingController();
   }
 
   PdfTool get tool => findTool(widget.toolId) ?? kTools.first;
@@ -132,6 +166,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
       : 'No file selected';
 
   static const _outputExt = {
+    'split': 'zip',
     'pdf-to-word': 'docx',
     'pdf-to-excel': 'xlsx',
     'pdf-to-html': 'html',
@@ -197,6 +232,9 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
         if (widget.toolId == 'fill-form' && paths.isNotEmpty && !append) {
           _loadFormFields(paths.first);
         }
+        if (isPdf && paths.isNotEmpty && !append) {
+          _loadThumbnail(paths.first);
+        }
       }
     } finally {
       setState(() => _picking = false);
@@ -222,6 +260,15 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
     } finally {
       setState(() => _loadingFormFields = false);
     }
+  }
+
+  Future<void> _loadThumbnail(String path) async {
+    try {
+      final thumbs = await PdfService.getPageThumbnails(path, dpi: 72);
+      if (thumbs.isNotEmpty && mounted) {
+        setState(() => _thumbnailBytes = thumbs.first);
+      }
+    } catch (_) {}
   }
 
   Future<void> _pickImageFile() async {
@@ -274,13 +321,34 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
           'end': _splitEnd,
           'n': _splitEveryN,
         },
-      'protect' => {'userPassword': _passwordField, 'ownerPassword': _passwordField},
+      'protect' => {
+          'userPassword': _passwordField,
+          'ownerPassword': _protectOwnerPassword.isEmpty ? _passwordField : _protectOwnerPassword,
+        },
       'unlock' => {'password': _passwordField},
-      'watermark' => {'text': _watermarkText},
-      'stamp' => {'stamp': _stampType, 'position': 'center'},
+      'watermark' => {
+          'text': _watermarkText,
+          'opacity': _watermarkOpacity,
+          'fontSize': _watermarkFontSize,
+          'rotation': _watermarkRotation,
+        },
+      'stamp' => {'stamp': _stampType, 'position': _stampPosition},
       'header-footer' => {'header': _headerText, 'footer': _footerText},
-      'add-text' => {'text': _addText, 'x': 50.0, 'y': 50.0, 'fontSize': 14.0, 'pageIndex': 0},
-      'add-image' => {'imagePath': _imagePath, 'x': 0.0, 'y': 0.0, 'width': 150.0, 'height': 150.0, 'pageIndex': 0},
+      'add-text' => {
+          'text': _addText,
+          'x': _addTextX,
+          'y': _addTextY,
+          'fontSize': _addTextFontSize,
+          'pageIndex': _addTextPage,
+        },
+      'add-image' => {
+          'imagePath': _imagePath,
+          'x': _addImageX,
+          'y': _addImageY,
+          'width': _addImageW,
+          'height': _addImageH,
+          'pageIndex': _addImagePage,
+        },
       'extract-pages' => {'pages': _selectedPages},
       'delete-pages' => {'pages': _selectedPages},
       'reorder-pages' => {'order': _pageOrder},
@@ -309,11 +377,11 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
         },
       'draw-sig' || 'typed-sig' || 'place-sig' => {
           'signatureBytes': _signatureBytes?.toList(),
-          'x': 50.0,
-          'y': 700.0,
-          'width': 200.0,
-          'height': 60.0,
-          'pageIndex': 0,
+          'x': _sigX,
+          'y': _sigY,
+          'width': _sigW,
+          'height': _sigH,
+          'pageIndex': _sigPage,
         },
       'redact' => {'areas': _redactAreas},
       'draw' => {
@@ -364,6 +432,7 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
     _redactHCtrl.dispose();
     for (final c in _formFieldControllers.values) { c.dispose(); }
     _watermarkCtrl.dispose();
+    _ownerPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -528,7 +597,14 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
       ),
       child: Row(
         children: [
-          const PdfFileThumbnail(),
+          if (_thumbnailBytes != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.memory(_thumbnailBytes!,
+                  width: 36, height: 48, fit: BoxFit.cover),
+            )
+          else
+            const PdfFileThumbnail(),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -818,11 +894,23 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
             borderSide: const BorderSide(color: AppColors.text, width: 2)),
       );
 
+  InputDecoration _pwDecoration() => InputDecoration(
+        hintText: '••••••••',
+        hintStyle: AppTextStyles.body(15, color: AppColors.faint),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.text)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.text, width: 2)),
+      );
+
   Widget _passwordOpts() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            widget.toolId == 'protect' ? 'Set password' : 'Enter current password',
+            widget.toolId == 'protect' ? 'Open password' : 'Enter current password',
             style: AppTextStyles.body(13, color: AppColors.muted),
           ),
           const SizedBox(height: 12),
@@ -831,20 +919,25 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
             onChanged: (v) => setState(() => _passwordField = v),
             style: AppTextStyles.body(15),
             cursorColor: AppColors.text,
-            decoration: InputDecoration(
-              hintText: '••••••••',
-              hintStyle: AppTextStyles.body(15, color: AppColors.faint),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: AppColors.text)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppColors.text, width: 2)),
-            ),
+            decoration: _pwDecoration(),
           ),
+          if (widget.toolId == 'protect') ...[
+            const SizedBox(height: 16),
+            Text('Owner password (controls editing)',
+                style: AppTextStyles.body(13, color: AppColors.muted)),
+            const SizedBox(height: 6),
+            Text('Leave blank to reuse the open password.',
+                style: AppTextStyles.mono(10, color: AppColors.muted)),
+            const SizedBox(height: 10),
+            TextField(
+              obscureText: true,
+              controller: _ownerPasswordCtrl,
+              onChanged: (v) => _protectOwnerPassword = v,
+              style: AppTextStyles.body(15),
+              cursorColor: AppColors.text,
+              decoration: _pwDecoration(),
+            ),
+          ],
         ],
       );
 
@@ -871,6 +964,21 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
                       const BorderSide(color: AppColors.text, width: 2)),
             ),
           ),
+          const SizedBox(height: 20),
+          _sliderRow(label: 'Opacity', value: _watermarkOpacity,
+              display: '${(_watermarkOpacity * 100).round()}%',
+              min: 0.05, max: 1.0, divisions: 19,
+              onChanged: (v) => setState(() => _watermarkOpacity = v)),
+          const SizedBox(height: 14),
+          _sliderRow(label: 'Font size', value: _watermarkFontSize,
+              display: '${_watermarkFontSize.round()}pt',
+              min: 20, max: 120, divisions: 20,
+              onChanged: (v) => setState(() => _watermarkFontSize = v)),
+          const SizedBox(height: 14),
+          _sliderRow(label: 'Rotation', value: _watermarkRotation,
+              display: '${_watermarkRotation.round()}°',
+              min: -90, max: 0, divisions: 18,
+              onChanged: (v) => setState(() => _watermarkRotation = v)),
         ],
       );
 
@@ -906,6 +1014,34 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
               );
             }).toList(),
           ),
+          const SizedBox(height: 20),
+          Text('Position', style: AppTextStyles.body(13, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8, runSpacing: 8,
+            children: {
+              'topLeft': 'Top Left', 'topRight': 'Top Right',
+              'center': 'Center',
+              'bottomLeft': 'Bottom Left', 'bottomRight': 'Bottom Right',
+            }.entries.map((e) {
+              final active = _stampPosition == e.key;
+              return GestureDetector(
+                onTap: () => setState(() => _stampPosition = e.key),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: active ? AppColors.text : AppColors.bg,
+                    border: Border.all(color: active ? AppColors.text : AppColors.line),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(e.value,
+                      style: AppTextStyles.mono(11,
+                          color: active ? AppColors.bg : AppColors.text)),
+                ),
+              );
+            }).toList(),
+          ),
         ],
       );
 
@@ -932,6 +1068,22 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
               style: AppTextStyles.body(13, color: AppColors.muted)),
           const SizedBox(height: 8),
           _textField(hint: 'Type something…', onChanged: (v) => _addText = v),
+          const SizedBox(height: 20),
+          Text('Position & size (pts)', style: AppTextStyles.body(13, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          Row(children: [
+            _cropInput('X', _addTextX, (v) => setState(() => _addTextX = v)),
+            const SizedBox(width: 10),
+            _cropInput('Y', _addTextY, (v) => setState(() => _addTextY = v)),
+            const SizedBox(width: 10),
+            _cropInput('Size', _addTextFontSize, (v) => setState(() => _addTextFontSize = v)),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            _cropInput('Page', _addTextPage.toDouble(), (v) => setState(() => _addTextPage = v.round().clamp(0, (_pageCount - 1).clamp(0, 9999)))),
+            const Expanded(child: SizedBox()),
+            const Expanded(child: SizedBox()),
+          ]),
         ],
       );
 
@@ -1100,6 +1252,9 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
           ),
           const SizedBox(height: 12),
           Text('Works on text-based PDFs only.',
+              style: AppTextStyles.mono(10, color: AppColors.muted)),
+          const SizedBox(height: 4),
+          Text('Output font will be Helvetica — original font family is not preserved.',
               style: AppTextStyles.mono(10, color: AppColors.muted)),
         ],
       );
@@ -1429,9 +1584,30 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
         else
           Text('Draw inside the black area above.',
               style: AppTextStyles.mono(10, color: AppColors.muted)),
+        const SizedBox(height: 20),
+        ..._sigPlacementInputs(),
       ],
     );
   }
+
+  List<Widget> _sigPlacementInputs() => [
+        Text('Placement (pts)', style: AppTextStyles.body(13, color: AppColors.muted)),
+        const SizedBox(height: 10),
+        Row(children: [
+          _cropInput('X', _sigX, (v) => setState(() => _sigX = v)),
+          const SizedBox(width: 10),
+          _cropInput('Y', _sigY, (v) => setState(() => _sigY = v)),
+          const SizedBox(width: 10),
+          _cropInput('Page', _sigPage.toDouble(), (v) => setState(() => _sigPage = v.round().clamp(0, (_pageCount - 1).clamp(0, 9999)))),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          _cropInput('W', _sigW, (v) => setState(() => _sigW = v)),
+          const SizedBox(width: 10),
+          _cropInput('H', _sigH, (v) => setState(() => _sigH = v)),
+          const Expanded(child: SizedBox()),
+        ]),
+      ];
 
   Widget _typedSigOpts() {
     return Column(
@@ -1470,6 +1646,8 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
           Text('Signature ready — tap Run to place it.',
               style: AppTextStyles.mono(10, color: AppColors.muted)),
         ],
+        const SizedBox(height: 20),
+        ..._sigPlacementInputs(),
       ],
     );
   }
@@ -1628,6 +1806,23 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
             const SizedBox(height: 8),
             Text('Select an image to continue', style: AppTextStyles.mono(10, color: AppColors.muted)),
           ],
+          const SizedBox(height: 20),
+          Text('Position & size (pts)', style: AppTextStyles.body(13, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          Row(children: [
+            _cropInput('X', _addImageX, (v) => setState(() => _addImageX = v)),
+            const SizedBox(width: 10),
+            _cropInput('Y', _addImageY, (v) => setState(() => _addImageY = v)),
+            const SizedBox(width: 10),
+            _cropInput('Page', _addImagePage.toDouble(), (v) => setState(() => _addImagePage = v.round().clamp(0, (_pageCount - 1).clamp(0, 9999)))),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            _cropInput('W', _addImageW, (v) => setState(() => _addImageW = v)),
+            const SizedBox(width: 10),
+            _cropInput('H', _addImageH, (v) => setState(() => _addImageH = v)),
+            const Expanded(child: SizedBox()),
+          ]),
         ],
       );
 
@@ -2185,6 +2380,45 @@ class _ToolScreenState extends ConsumerState<ToolScreen> {
       ],
     );
   }
+
+  Widget _sliderRow({
+    required String label,
+    required double value,
+    required String display,
+    required double min,
+    required double max,
+    required int divisions,
+    required ValueChanged<double> onChanged,
+  }) =>
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: AppTextStyles.body(13, color: AppColors.muted)),
+              Text(display, style: AppTextStyles.mono(11)),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: AppColors.text,
+              inactiveTrackColor: AppColors.line,
+              thumbColor: AppColors.text,
+              overlayColor: AppColors.text.withValues(alpha: 0.1),
+              trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+            ),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: divisions,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      );
 
   Widget _textField(
           {required String hint, required ValueChanged<String> onChanged}) =>

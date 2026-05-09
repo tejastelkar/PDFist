@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 import '../providers/providers.dart';
 import '../services/auth_service.dart';
 import '../services/history_service.dart';
@@ -20,16 +22,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _grain = true;
   String? _toast;
   int _localCount = 0;
+  String _outputSize = '…';
+  int _outputFileCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadCount();
+    _loadOutputSize();
   }
 
   Future<void> _loadCount() async {
     final n = await HistoryService.instance.localCount();
     if (mounted) setState(() => _localCount = n);
+  }
+
+  Future<void> _loadOutputSize() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final outDir = Directory('${dir.path}/PDFist/Output');
+      if (!outDir.existsSync()) {
+        if (mounted) { setState(() { _outputSize = '0 B'; _outputFileCount = 0; }); }
+        return;
+      }
+      final files = outDir.listSync().whereType<File>().toList();
+      final bytes = files.fold<int>(0, (s, f) => s + f.lengthSync());
+      String fmt;
+      if (bytes < 1024) { fmt = '$bytes B'; }
+      else if (bytes < 1048576) { fmt = '${(bytes / 1024).toStringAsFixed(0)} KB'; }
+      else { fmt = '${(bytes / 1048576).toStringAsFixed(1)} MB'; }
+      if (mounted) setState(() { _outputSize = fmt; _outputFileCount = files.length; });
+    } catch (_) { if (mounted) setState(() => _outputSize = '—'); }
+  }
+
+  Future<void> _clearOutputFolder() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final outDir = Directory('${dir.path}/PDFist/Output');
+      if (outDir.existsSync()) {
+        for (final f in outDir.listSync().whereType<File>()) { f.deleteSync(); }
+      }
+      await _loadOutputSize();
+      _showToast('Output folder cleared');
+    } catch (_) { _showToast('Could not clear folder'); }
   }
 
   void _showToast(String msg) {
@@ -179,6 +214,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: 'Clear history',
                           detail: '$_localCount files',
                           onTap: _clearHistory,
+                        ),
+                      ],
+                    ),
+
+                    _Section(
+                      title: 'Storage',
+                      children: [
+                        SettingsRow(
+                          label: 'Output folder',
+                          detail: '$_outputFileCount files · $_outputSize',
+                        ),
+                        SettingsRow(
+                          label: 'Clear output folder',
+                          detail: 'Delete all processed files',
+                          onTap: _clearOutputFolder,
                         ),
                       ],
                     ),

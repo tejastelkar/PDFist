@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:archive/archive.dart' hide ZLibDecoder, ZLibEncoder;
 import 'dart:math' as math;
 // dart:ui gives us Offset, Size, Rect, Image, ImageByteFormat (all used below).
 // ignore: unnecessary_import
@@ -148,11 +149,26 @@ Map<String, dynamic> _doSplit(Map<String, dynamic> p_) {
       totalOutput += outBytes.length;
     }
     doc.dispose();
+    // When mode produces multiple files, zip them for single-tap sharing.
+    String finalPath = outputPaths.first;
+    int finalSize = totalOutput;
+    if (outputPaths.length > 1) {
+      final archive = Archive();
+      for (final op in outputPaths) {
+        final data = File(op).readAsBytesSync();
+        archive.addFile(ArchiveFile(p.basename(op), data.length, data));
+      }
+      final zipBytes = ZipEncoder().encode(archive);
+      final zipPath = p.join(outputDir, '${base}_split_${DateTime.now().millisecondsSinceEpoch}.zip');
+      File(zipPath).writeAsBytesSync(Uint8List.fromList(zipBytes));
+      finalPath = zipPath;
+      finalSize = zipBytes.length;
+    }
     return {
       'success': true,
-      'outputPath': outputPaths.first,
+      'outputPath': finalPath,
       'outputPaths': outputPaths,
-      'outputSize': totalOutput,
+      'outputSize': finalSize,
       'pageCount': firstOutputPageCount,
       'inputSize': bytes.length,
       'ms': sw.elapsedMilliseconds,

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDFist Converter Bridge</title>
+<style>
+  body { margin: 0; background: #000; color: #fff; font-family: monospace; font-size: 12px; padding: 16px; }
+  #status { margin-top: 8px; opacity: 0.6; }
+</style>
+</head>
+<body>
+<div id="status">Initialising converter…</div>
+
+<!--
+  PDF.js   — reads PDF structure client-side
+  docx.js  — generates .docx output
+  SheetJS  — generates .xlsx output
+
+  Load from CDN (requires INTERNET permission, already declared in AndroidManifest).
+  These are fetched at runtime so no API key is needed.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.0.0/docx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script>
+// ─── Flutter → JS channel ────────────────────────────────────────────────────
+// Flutter calls: ConverterChannel.postMessage(JSON.stringify({action, payload}))
+// JS calls back: ConverterResult.postMessage(JSON.stringify({success, data, error}))
+
+const status = document.getElementById('status');
+
+function reply(obj) {
+  if (window.ConverterResult) {
+    window.ConverterResult.postMessage(JSON.stringify(obj));
+  }
+}
+
+function setStatus(msg) {
+  status.textContent = msg;
+}
+
+// ─── PDF → Word (BETA) ────────────────────────────────────────────────────────
+async function pdfToWord(base64Pdf) {
+  try {
+    setStatus('Reading PDF…');
+    const raw = atob(base64Pdf);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const paragraphs = [];
+
+    for (let p = 1; p <= pdf.numPages; p++) {
+      setStatus(`Extracting page ${p}/${pdf.numPages}…`);
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const text = content.items.map(i => i.str).join(' ');
+      paragraphs.push(
+        new docx.Paragraph({ children: [new docx.TextRun(text)] })
+      );
+      paragraphs.push(new docx.Paragraph({})); // blank between pages
+    }
+
+    setStatus('Building .docx…');
+    const doc = new docx.Document({
+      sections: [{ properties: {}, children: paragraphs }],
+    });
+
+    const blob = await docx.Packer.toBase64String(doc);
+    setStatus('Done.');
+    reply({ success: true, data: blob, format: 'docx' });
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+    reply({ success: false, error: e.message });
+  }
+}
+
+// ─── PDF → Excel (BETA) ───────────────────────────────────────────────────────
+async function pdfToExcel(base64Pdf) {
+  try {
+    setStatus('Reading PDF…');
+    const raw = atob(base64Pdf);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const wb = XLSX.utils.book_new();
+
+    for (let p = 1; p <= pdf.numPages; p++) {
+      setStatus(`Processing page ${p}/${pdf.numPages}…`);
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+
+      // Group items by approximate Y position into rows.
+      const rows = {};
+      content.items.forEach(item => {
+        const y = Math.round(item.transform[5] / 10) * 10;
+        if (!rows[y]) rows[y] = [];
+        rows[y].push(item.str);
+      });
+
+      const aoa = Object.keys(rows)
+        .sort((a, b) => b - a)
+        .map(y => rows[y]);
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      XLSX.utils.book_append_sheet(wb, ws, `Page ${p}`);
+    }
+
+    setStatus('Building .xlsx…');
+    const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+    setStatus('Done.');
+    reply({ success: true, data: base64, format: 'xlsx' });
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+    reply({ success: false, error: e.message });
+  }
+}
+
+// ─── Word → PDF  (via browser print — limited) ────────────────────────────────
+async function wordToPdf(base64Docx) {
+  // Full Word→PDF conversion requires a native library.
+  // This stub notifies Flutter that the operation is not supported in WebView.
+  reply({ success: false, error: 'Word→PDF requires a native converter. Coming soon.' });
+}
+
+// ─── Excel → PDF (via browser print — limited) ───────────────────────────────
+async function excelToPdf(base64Xlsx) {
+  reply({ success: false, error: 'Excel→PDF requires a native converter. Coming soon.' });
+}
+
+// ─── Message dispatcher ───────────────────────────────────────────────────────
+window.handleMessage = function(jsonStr) {
+  const msg = JSON.parse(jsonStr);
+  switch (msg.action) {
+    case 'pdfToWord':  pdfToWord(msg.payload);  break;
+    case 'pdfToExcel': pdfToExcel(msg.payload); break;
+    case 'wordToPdf':  wordToPdf(msg.payload);  break;
+    case 'excelToPdf': excelToPdf(msg.payload); break;
+    default:
+      reply({ success: false, error: 'Unknown action: ' + msg.action });
+  }
+};
+
+setStatus('Ready.');
+</script>
+</body>
+</html>

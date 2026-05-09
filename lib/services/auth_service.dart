@@ -59,11 +59,17 @@ class AuthService {
 
   Future<void> createAccount(String email, String password) async {
     if (!kFirebaseEnabled) throw Exception('Firebase not configured yet.');
-    await FirebaseAuth.instance.createUserWithEmailAndPassword(
+    final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
       email: email,
       password: password,
     );
     _anonymousSession = false;
+    await cred.user?.sendEmailVerification();
+  }
+
+  Future<void> sendPasswordReset(String email) async {
+    if (!kFirebaseEnabled) throw Exception('Firebase not configured yet.');
+    await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
   }
 
   void continueAnonymously() {

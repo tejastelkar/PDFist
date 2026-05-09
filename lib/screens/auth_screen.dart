@@ -21,6 +21,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   bool _pwFocused = false;
   bool _loading = false;
   String? _error;
+  String? _info;
 
   bool get _canSubmit => _email.isNotEmpty && _pw.length >= 6 && !_loading;
 
@@ -39,20 +40,39 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
   Future<void> _submit() async {
     if (!_canSubmit) return;
-    if (!kFirebaseEnabled) {
-      // Firebase not set up yet — let the user in anonymously so they can
-      // still use all local PDF tools.
-      _setAnon();
-      return;
-    }
-    setState(() { _loading = true; _error = null; });
+    if (!kFirebaseEnabled) { _setAnon(); return; }
+    setState(() { _loading = true; _error = null; _info = null; });
     try {
       if (_isSignIn) {
         await AuthService.instance.signInWithEmail(_email, _pw);
+        if (mounted) _setAuth();
       } else {
         await AuthService.instance.createAccount(_email, _pw);
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _info = 'Account created! Check your email to verify, then sign in.';
+            _isSignIn = true;
+          });
+        }
       }
-      if (mounted) _setAuth();
+    } catch (e) {
+      if (mounted) setState(() { _error = _friendly(e); _loading = false; });
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    if (_email.isEmpty) {
+      setState(() { _error = 'Enter your email above first.'; });
+      return;
+    }
+    if (!kFirebaseEnabled) return;
+    setState(() { _loading = true; _error = null; _info = null; });
+    try {
+      await AuthService.instance.sendPasswordReset(_email);
+      if (mounted) {
+        setState(() { _loading = false; _info = 'Reset email sent to $_email'; });
+      }
     } catch (e) {
       if (mounted) setState(() { _error = _friendly(e); _loading = false; });
     }
@@ -60,7 +80,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
   Future<void> _googleSignIn() async {
     if (!kFirebaseEnabled) { _setAnon(); return; }
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _info = null; });
     try {
       await AuthService.instance.signInWithGoogle();
       if (mounted) _setAuth();
@@ -159,14 +179,24 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       onChanged: (v) => setState(() => _pw = v),
                       onFocusChange: (f) => setState(() => _pwFocused = f),
                       focused: _pwFocused,
-                      trailing: Text('Forgot',
-                          style: AppTextStyles.mono(9, color: AppColors.muted)),
+                      trailing: GestureDetector(
+                        onTap: _isSignIn && !_loading ? _forgotPassword : null,
+                        child: Text('Forgot',
+                            style: AppTextStyles.mono(9,
+                                color: _isSignIn ? AppColors.text : AppColors.faint)),
+                      ),
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: 14),
                       Text(_error!,
                           style: AppTextStyles.body(12,
                               color: AppColors.text.withValues(alpha: 0.7))),
+                    ],
+                    if (_info != null) ...[
+                      const SizedBox(height: 14),
+                      Text(_info!,
+                          style: AppTextStyles.body(12,
+                              color: AppColors.text.withValues(alpha: 0.55))),
                     ],
                     const SizedBox(height: 36),
                     FillButton(

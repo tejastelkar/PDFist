@@ -107,6 +107,7 @@ class PdfProcessingNotifier extends Notifier<ProcessingState> {
           status: 'success',
         );
         await HistoryService.instance.addEntry(entry);
+        ref.read(historyRefreshProvider.notifier).update((v) => v + 1);
 
         state = ProcessingState(
           status: ProcessingStatus.success,
